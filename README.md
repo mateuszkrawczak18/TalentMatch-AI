@@ -29,9 +29,10 @@ pip install -r requirements.txt
 
 3) Set environment variables in `.env`:
 ```bash
-OPENAI_API_KEY=your_api_key_here
+cp .env.example .env   # Linux/Mac
+# or
+copy .env.example .env # Windows CMD
 ```
-If using Azure OpenAI, add endpoint/deployment variables as expected by `utils/config`.
 
 4) Start Neo4j (from the Project directory):
 ```bash
