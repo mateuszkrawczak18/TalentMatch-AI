@@ -1,0 +1,27 @@
+# --- Core Framework ---
+langchain>=0.1.16
+langchain-core>=0.1.42
+langchain-community>=0.0.32
+langchain-experimental>=0.0.56
+langchain-openai>=0.1.3
+
+# --- Graph Database (Neo4j) ---
+langchain-neo4j>=0.1.0
+neo4j>=5.19.0
+
+# --- Vector Database (Naive RAG) ---
+# Zmieniono na >=0.1.2, aby naprawić błąd "No matching distribution"
+langchain-chroma>=0.1.2
+chromadb>=0.4.24
+
+# --- Document Processing (PDF) ---
+pypdf>=4.2.0
+# Usunięto [pdf] dla prostszej instalacji (pypdf wystarczy do naszych potrzeb)
+unstructured>=0.13.0
+tiktoken>=0.6.0
+
+# --- Data Generation & Utils ---
+Faker>=24.11.0
+reportlab>=4.2.0
+toml>=0.10.2
+python-dotenv>=1.0.1

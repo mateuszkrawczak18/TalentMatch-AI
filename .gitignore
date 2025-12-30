@@ -1,0 +1,15 @@
+# Baza danych (TO JEST NAJWAŻNIEJSZE)
+neo4j_data/
+
+# Środowisko wirtualne
+venv/
+
+# Pliki tymczasowe Pythona
+__pycache__/
+*.pyc
+
+# Zmienne środowiskowe (klucze API!)
+.env
+
+# CVS
+data/
