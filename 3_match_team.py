@@ -25,7 +25,7 @@ class TeamMatcher:
             api_version=os.getenv("OPENAI_API_VERSION"),
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
             api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-            temperature=0,
+            temperature=1.0,
             max_retries=5,      
             request_timeout=120 
         )

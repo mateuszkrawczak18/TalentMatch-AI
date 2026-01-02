@@ -33,7 +33,7 @@ class GraphRAGDataGenerator:
             api_version=os.getenv("OPENAI_API_VERSION"),
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
             api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-            temperature=0.8,
+            temperature=1.0,
             max_retries=5,
             request_timeout=60
         )
@@ -183,6 +183,7 @@ class GraphRAGDataGenerator:
                     time.sleep(0.5)
                 except Exception as e:
                     attempts += 1
+                    print(f"⚠️ Attempt {attempts} failed for {name}: {str(e)}")
                     time.sleep(2)
             if not success: print(f"❌ Failed: {name}")
 
