@@ -1,15 +1,52 @@
-# Baza danych (TO JEST NAJWAŻNIEJSZE)
-neo4j_data/
-
-# Środowisko wirtualne
-venv/
-
-# Pliki tymczasowe Pythona
-__pycache__/
-*.pyc
-
-# Zmienne środowiskowe (klucze API!)
+# --- SECURITY ---
 .env
+.env.local
+.streamlit/secrets.toml
 
-# CVS
-data/
+# --- PYTHON & SYSTEM ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+.DS_Store       # Mac
+Thumbs.db       # Windows
+Desktop.ini     # Windows
+
+# --- VIRTUAL ENVIRONMENTS ---
+venv/
+.venv/
+env/
+Lib/
+Scripts/
+
+# --- IDE SETTINGS (VS Code, PyCharm) ---
+.vscode/
+.idea/
+*.swp
+
+# --- DATABASE (Neo4j Docker & Local) ---
+neo4j_data/
+neo4j_import/
+neo4j_plugins/
+neo4j_logs/
+
+# --- VECTOR STORE (Naive RAG Storage) ---
+faiss_index/
+chroma_db/
+vector_store/
+embeddings_cache/
+
+# --- GENERATED DATA (PDFs) ---
+data/cvs/*.pdf
+data/rfps/*.pdf
+
+# --- LOCAL DATABASES ---
+data/db/
+
+
+# --- PROJECT DOCUMENTATION ---
+PRD.md
+PROJECT_INSTRUCTIONS.md
+
+# Jeśli zdecydujesz, że DEMO_SCRIPT też jest prywatny, odkomentuj linię niżej:
+# DEMO_SCRIPT.md

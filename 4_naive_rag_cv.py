@@ -1,29 +1,28 @@
 import os
 import glob
+import time
 from dotenv import load_dotenv
+
+# Używamy sprawdzonych modułów (Core + Community)
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from langchain_chroma import Chroma
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
 
 load_dotenv()
 
 class NaiveRAGSystem:
     def __init__(self):
-        # 1. Konfiguracja Azure - WAŻNE: Musisz mieć model Embeddings w Azure
-        # Upewnij się, że masz AZURE_EMBEDDING_DEPLOYMENT w .env (np. text-embedding-3-small)
-        embedding_deployment = os.getenv("AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-3-small")
-        
+        # Wyciszamy logi konfiguracji, żeby nie śmiecić w benchmarku
+        # 1. Konfiguracja Embeddingów
         self.embeddings = AzureOpenAIEmbeddings(
-            azure_deployment=embedding_deployment,
-            api_version=os.getenv("OPENAI_API_VERSION"),
+            azure_deployment=os.getenv("AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-3-small"),
+            openai_api_version=os.getenv("OPENAI_API_VERSION"),
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
             api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         )
         
+        # 2. Konfiguracja Modelu Chat
         self.llm = AzureChatOpenAI(
             azure_deployment=os.getenv("AZURE_DEPLOYMENT_NAME"),
             api_version=os.getenv("OPENAI_API_VERSION"),
@@ -35,8 +34,7 @@ class NaiveRAGSystem:
         self.vectorstore = None
 
     def ingest_data(self):
-        """Wczytuje PDFy i buduje indeks wektorowy (czyta całość RAZ)"""
-        print("📥 [Naive RAG] Loading PDFs...")
+        print("   📥 [Naive RAG] Loading PDFs...")
         files = glob.glob("data/cvs/*.pdf")
         
         if not files:
@@ -45,74 +43,80 @@ class NaiveRAGSystem:
 
         documents = []
         for f in files:
-            loader = PyPDFLoader(f)
-            documents.extend(loader.load())
+            try:
+                loader = PyPDFLoader(f)
+                documents.extend(loader.load())
+            except Exception:
+                pass 
+
+        if not documents:
+            print("❌ No valid documents loaded.")
+            return False
             
-        print(f"   Loaded {len(documents)} pages from {len(files)} files.")
-        
-        # Cięcie tekstu na kawałki (Chunks)
+        # Cięcie tekstu
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
         splits = text_splitter.split_documents(documents)
-        print(f"   Split into {len(splits)} text chunks.")
         
-        # Tworzenie bazy wektorowej
-        print("   Creating Embeddings (this may take a moment)...")
-        try:
-            self.vectorstore = Chroma.from_documents(
-                documents=splits, 
-                embedding=self.embeddings,
-                collection_name="cv_collection" # Baza w pamięci RAM dla szybkości testu
-            )
-            print("✅ Vector Store ready.")
-            return True
-        except Exception as e:
-            print(f"❌ Error creating embeddings: {e}")
-            print("💡 TIP: Check if AZURE_EMBEDDING_DEPLOYMENT is correct in .env")
-            return False
+        # Baza wektorowa (Chroma) z mechanizmem RETRY
+        print(f"   Creating Embeddings for {len(splits)} chunks...")
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                self.vectorstore = Chroma.from_documents(
+                    documents=splits, 
+                    embedding=self.embeddings,
+                    collection_name="cv_collection"
+                )
+                print("   ✅ Vector Store ready.")
+                return True
+            except Exception as e:
+                print(f"   ⚠️ Connection Error (Attempt {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    print("   ⏳ Waiting 5s before retrying...")
+                    time.sleep(5)
+                else:
+                    print(f"❌ Failed to create Vector Store after {max_retries} attempts.")
+                    return False
 
     def query(self, question):
         if not self.vectorstore:
-            print("⚠️ Index not ready.")
+            print("⚠️ System not initialized.")
             return
 
-        print(f"\n❓ NAIVE QUERY: {question}")
-        
-        # Retrieve: Pobierz TYLKO 5 najbardziej pasujących fragmentów
-        # To jest cecha Naive RAG - ograniczone okno kontekstowe
-        retriever = self.vectorstore.as_retriever(search_kwargs={"k": 5})
-        
-        template = """Answer the question based ONLY on the following context context.
-        If you don't know the answer or the context is insufficient, say "I don't know".
-        
-        Context:
-        {context}
-        
-        Question: {question}
-        """
-        prompt = ChatPromptTemplate.from_template(template)
-        
-        chain = (
-            {"context": retriever | self.format_docs, "question": RunnablePassthrough()}
-            | prompt
-            | self.llm
-            | StrOutputParser()
-        )
+        # print(f"\n❓ NAIVE QUERY: {question}") # Wyłączone, bo skrypt 5 sam drukuje pytania
         
         try:
-            response = chain.invoke(question)
-            print(f"🤖 NAIVE ANSWER: {response}")
-            return response
+            # KROK 1: Retrieval
+            docs = self.vectorstore.similarity_search(question, k=5)
+            context_text = "\n\n".join([d.page_content for d in docs])
+            
+            # KROK 2: Generation
+            prompt = f"""
+            You are a helpful HR Assistant. Answer the question based ONLY on the context provided below.
+            If the answer is not in the context, say "I don't know".
+            
+            CONTEXT:
+            {context_text}
+            
+            QUESTION:
+            {question}
+            """
+            
+            response = self.llm.invoke(prompt)
+            answer = response.content
+            
+            # Printujemy tylko odpowiedź, bo skrypt 5 drukuje resztę
+            print(f"Result: {answer}")
+            return answer
+            
         except Exception as e:
             print(f"❌ Error: {e}")
             return "Error"
 
-    def format_docs(self, docs):
-        return "\n\n".join([d.page_content for d in docs])
-
 if __name__ == "__main__":
     rag = NaiveRAGSystem()
     if rag.ingest_data():
-        # Testy porównawcze
         rag.query("Who is experienced in Python?")
-        rag.query("How many developers are located in London?") # Tu powinien polec (zwróci np. 2-3 zamiast wszystkich)
-        rag.query("Who is currently available (not busy)?")     # Tu musi polec (nie ma danych o availability w PDF)
+        rag.query("How many developers are located in London?") 
+        rag.query("Who is currently available (not busy)?")

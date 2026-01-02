@@ -40,17 +40,32 @@ class TeamMatcher:
         except: return {}
 
     def reset_assignments(self):
-        """Czyści stan projektu (usuwa projekty i przypisania) przed nowym uruchomieniem."""
-        print("🧹 Resetting project assignments and deleting old Project nodes...")
+        """
+        SMART RESET:
+        Usuwa tylko projekty z RFP (te, które NIE są 'Ongoing').
+        Zachowuje 'Ongoing' projekty stworzone przez skrypt 2b_ingest_projects.py.
+        """
+        print("🧹 Cleaning up previous RFP assignments (Preserving 'Ongoing' projects)...")
         try:
-            self.graph.query("MATCH (p:Project) DETACH DELETE p")
-            self.graph.query("MATCH (:Person)-[r:ASSIGNED_TO]->() DELETE r")
-            print("✅ System ready for fresh matching.")
+            # 1. Usuń relacje ASSIGNED_TO tylko dla projektów, które NIE są Ongoing
+            self.graph.query("""
+                MATCH (:Person)-[r:ASSIGNED_TO]->(p:Project)
+                WHERE p.status <> 'Ongoing' OR p.status IS NULL
+                DELETE r
+            """)
+            
+            # 2. Usuń same węzły Projektów (tylko te z RFP)
+            self.graph.query("""
+                MATCH (p:Project)
+                WHERE p.status <> 'Ongoing' OR p.status IS NULL
+                DETACH DELETE p
+            """)
+            print("✅ System ready. 'Ongoing' projects preserved.")
         except Exception as e:
             print(f"⚠️ Warning during reset: {e}")
 
     def analyze_rfp(self, pdf_path: str) -> Dict:
-        """Czyta plik PDF RFP i wyciąga wymagania (Skille, Lokalizacja, Wielkość zespołu)."""
+        """Czyta plik PDF RFP i wyciąga wymagania."""
         print(f"\n📄 Analyzing RFP: {os.path.basename(pdf_path)}...")
         
         max_retries = 3
@@ -93,7 +108,7 @@ class TeamMatcher:
         MERGE (p:Project {name: $name})
         SET p.location = $location, 
             p.required_skills = $skills,
-            p.status = 'Active'
+            p.status = 'New RFP'
         RETURN p
         """
         self.graph.query(query, {
@@ -107,7 +122,7 @@ class TeamMatcher:
         """
         Główna logika rekrutacji:
         1. Strict Match: Szuka osób ze skillami, w lokalizacji i z wolnym czasem.
-        2. Fallback: Jeśli brakuje ludzi, dobiera kogokolwiek wolnego (Juniorzy/Inni).
+        2. Fallback: Jeśli brakuje ludzi, dobiera kogokolwiek wolnego.
         3. Assign: Zapisuje relację ASSIGNED_TO w bazie.
         """
         skills = reqs.get('required_skills', [])
@@ -119,18 +134,18 @@ class TeamMatcher:
         print(f"   🔍 Looking for {team_size} people. Req. Allocation: {allocation_needed*100}%")
 
         # --- KROK 1: STRICT MATCH (Idealni kandydaci) ---
-        # Szukamy po relacji :HAS_SKILL i :LOCATED_IN (tylko miasta, ignorujemy uczelnie :EDUCATED_AT)
+        # Query uwzględnia obciążenie ze WSZYSTKICH projektów (Ongoing + New)
         query_strict = """
         MATCH (p:Person)-[:HAS_SKILL]->(s:Skill)
-        WHERE toLower(s.id) IN [skill IN $skills | toLower(skill)]
+        WHERE toLower(s.name) IN [skill IN $skills | toLower(skill)]
         
-        // Pobieramy miasto (jeśli istnieje)
+        // Opcjonalne sprawdzenie lokalizacji
         OPTIONAL MATCH (p)-[:LOCATED_IN]->(l:Location)
         
-        // Sprawdzamy obecne obciążenie pracą
-        OPTIONAL MATCH (p)-[r:ASSIGNED_TO]->(other_proj:Project)
+        // Sprawdzenie obecnego obciążenia (Sumujemy Ongoing + inne New RFP)
+        OPTIONAL MATCH (p)-[r:ASSIGNED_TO]->(any_project:Project)
         
-        WITH p, l, count(s) as skill_count, collect(s.id) as skills_found, sum(coalesce(r.allocation, 0.0)) as current_load
+        WITH p, l, count(s) as skill_count, collect(s.name) as skills_found, sum(coalesce(r.allocation, 0.0)) as current_load
         
         // Filtr dostępności
         WHERE current_load + $needed_alloc <= 1.0
@@ -139,8 +154,8 @@ class TeamMatcher:
         WITH p, l, skill_count, skills_found, current_load,
              CASE 
                 WHEN $location IS NULL THEN 10 
-                WHEN l IS NOT NULL AND toLower(l.id) CONTAINS toLower($location) THEN 50
-                WHEN l IS NOT NULL AND toLower(l.id) CONTAINS 'remote' THEN 5
+                WHEN l IS NOT NULL AND toLower(l.name) CONTAINS toLower($location) THEN 50
+                WHEN l IS NOT NULL AND toLower(l.name) CONTAINS 'remote' THEN 5
                 ELSE 0 
              END as loc_score
         
@@ -148,8 +163,7 @@ class TeamMatcher:
         WITH p, l, skills_found, current_load,
              (skill_count * 10) + loc_score + ((1.0 - current_load) * 20) as final_score
         
-        // DISTINCT zapobiega duplikatom, jeśli ktoś ma np. 2 relacje do miast (chociaż po fixie w pliku 2 nie powinien)
-        RETURN DISTINCT p.id as name, coalesce(l.id, 'Unknown') as city, final_score, skills_found, current_load
+        RETURN DISTINCT p.name as name, coalesce(l.name, 'Unknown') as city, final_score, skills_found, current_load
         ORDER BY final_score DESC
         LIMIT $limit
         """
@@ -173,21 +187,20 @@ class TeamMatcher:
         if missing_count > 0:
             print(f"   ⚠️ Only found {len(candidates)} perfect matches. Looking for {missing_count} available candidates (Fallback)...")
             
-            # Wykluczamy tych, których już znaleźliśmy
             excluded_names = [c['name'] for c in candidates]
             
             query_fallback = """
             MATCH (p:Person)
-            WHERE NOT p.id IN $excluded
+            WHERE NOT p.name IN $excluded
             
             OPTIONAL MATCH (p)-[:LOCATED_IN]->(l:Location)
-            OPTIONAL MATCH (p)-[r:ASSIGNED_TO]->(other_proj:Project)
+            OPTIONAL MATCH (p)-[r:ASSIGNED_TO]->(any_project:Project)
             
             WITH p, l, sum(coalesce(r.allocation, 0.0)) as current_load
             
             WHERE current_load + $needed_alloc <= 1.0
             
-            RETURN DISTINCT p.id as name, coalesce(l.id, 'Unknown') as city, 10.0 as final_score, [] as skills_found, current_load
+            RETURN DISTINCT p.name as name, coalesce(l.name, 'Unknown') as city, 10.0 as final_score, [] as skills_found, current_load
             LIMIT $limit
             """
             
@@ -206,7 +219,7 @@ class TeamMatcher:
         if candidates:
             for member in candidates:
                 assign_query = """
-                MATCH (p:Person {id: $name}), (proj:Project {name: $proj_name})
+                MATCH (p:Person {name: $name}), (proj:Project {name: $proj_name})
                 MERGE (p)-[r:ASSIGNED_TO]->(proj)
                 SET r.allocation = $alloc, r.role = 'Developer', r.assigned_at = datetime()
                 """
@@ -216,7 +229,6 @@ class TeamMatcher:
                         "proj_name": project_name,
                         "alloc": allocation_needed
                     })
-                    # Aktualizujemy load do raportu
                     member['new_load'] = member['current_load'] + allocation_needed
                     final_team.append(member)
                 except Exception as e:
@@ -235,7 +247,7 @@ class TeamMatcher:
 
         for i, member in enumerate(team, 1):
             is_fallback = len(member['skills_found']) == 0
-            skills_info = f"{len(member['skills_found'])}" if not is_fallback else "0 (Fallback)"
+            skills_info = f"{member['skills_found']}" if not is_fallback else "0 (Fallback)"
             
             print(f"{i}. {member['name']} ({member['city']})")
             print(f"   📊 Score: {member['final_score']} | Skills: {skills_info}")
@@ -243,22 +255,19 @@ class TeamMatcher:
         print("\n")
 
 def print_visualization_link():
-    """Wyświetla link i instrukcję do wizualizacji w Neo4j Browser"""
     print("\n" + "="*60)
     print("👀 VISUALIZE YOUR GRAPH")
     print("="*60)
     print("1. Open Neo4j Browser: http://localhost:7474")
-    print("   (Use credentials from .env, typically neo4j/password123)")
-    print("\n2. Run this Cypher query to see the TEAM ASSIGNMENTS:")
+    print("2. Run this Cypher query to see ALL PROJECTS (Ongoing + New):")
     print("   MATCH (p:Person)-[r:ASSIGNED_TO]->(pr:Project) RETURN p, r, pr")
-    print("\n3. Or run this to see the WHOLE GRAPH:")
-    print("   MATCH (n) RETURN n LIMIT 50")
+    print("\n💡 TIP: If you see numbers on nodes, click the Node Label (e.g. Person) and select 'name' in the bottom caption bar.")
     print("="*60 + "\n")
 
 if __name__ == "__main__":
     matcher = TeamMatcher()
     
-    # 1. Reset stanu bazy
+    # 1. SMART RESET (Zachowuje Ongoing Projects)
     matcher.reset_assignments()
     
     # 2. Pobranie plików RFP
@@ -275,7 +284,7 @@ if __name__ == "__main__":
                 # B. Stworzenie projektu w bazie
                 matcher.create_project_node(reqs)
                 
-                # C. Znalezienie i przypisanie zespołu (Strict + Fallback)
+                # C. Znalezienie i przypisanie zespołu
                 team = matcher.find_and_assign_team(reqs)
                 
                 # D. Raport
