@@ -153,7 +153,7 @@ python 2b_ingest_projects.py         # ETL: Load Projects & Assignments (Critica
 6. Team matching (Optional - automated staffing):
 
 ```bash
-pa             # Runs scoring algorithm for new RFPs
+python 3_match_team.py               # Runs scoring algorithm for new RFPs
 ```
 
 7. Baseline and comparison:
@@ -163,7 +163,7 @@ python benchmarks/4_naive_rag_cv.py    # Create vector baseline
 python benchmarks/5_compare_systems.py  # Run benchmark: GraphRAG vs Naive RAG
 python benchmarks/6_stress_test_scalability.py   # Load testing & bottleneck analysis
 python benchmarks/7_throughput_test.py           # Concurrent query throughput
-python 8_cleanup_clones.py         # Duplicates cleanup
+python benchmarks/8_cleanup_clones.py            # Duplicates cleanup
 ```
 
 8. Launch Streamlit UI:
@@ -207,16 +207,34 @@ The **REST API** (`api.py`) provides machine-to-machine integration with:
 
 ## 📊 Benchmark Results
 
-### Baseline Comparison
+### GraphRAG vs Traditional RAG Comparison
+
+| Feature / Scenario | Naive RAG (Vector) | GraphRAG (TalentMatch) | Winner |
+|---|---|---|---|
+| **Aggregation** (e.g., "Avg rate of Seniors") | ❌ Hallucinates or fails | ✅ 100% Accurate (math via DB) | **Graph** |
+| **Multi-hop Reasoning** (e.g., "Who worked with X?") | ❌ Misses connections | ✅ Traverses relationships | **Graph** |
+| **Availability Logic** (e.g., "Who is free now?") | ⚠️ Cannot verify state | ✅ Real-time status from DB | **Graph** |
+| **Boolean Filtering** (complex AND/OR queries) | ❌ Unreliable | ✅ Type-safe Cypher execution | **Graph** |
+| **Latency** (p95) | 0.8-1.5s | 1.5-2.5s | RAG (faster but less accurate) |
+| **Precision on Structured Data** | ~40% | 100% | **Graph** |
+
+**Reproduce Results:**
+```bash
+python benchmarks/5_compare_systems.py
+```
+
+### Detailed Metrics
+
 See [benchmarks/](benchmarks/) directory for detailed metrics:
 - **4_naive_rag_cv.py**: ChromaDB vector search baseline
 - **5_compare_systems.py**: GraphRAG vs Naive RAG accuracy/speed comparison
-- **6_stress_test_scalability.py**: Load testing (100→1000 concurrent queries)
-- **7_throughput_test.py**: Query throughput under peak conditions
+- **6_stress_test_scalability.py**: Load testing (30→600 nodes, bottleneck analysis)
+- **7_throughput_test.py**: Async API concurrent request handling
+- **8_cleanup_clones.py**: Database cleanup & reset utility
 
-### Performance & Accuracy
+### Performance Summary
 - **GraphRAG precision**: 100% on structured queries (0 hallucinations)
-- **Naive RAG precision**: ~40% on complex queries (frequent hallucinations)
+- **Naive RAG precision**: ~40% on complex queries
 - **GraphRAG latency**: 1.5-2.5s (includes Cypher generation + execution)
 - **Naive RAG latency**: 0.8-1.5s (faster but less accurate)
 - **Scalability**: GraphRAG handles 500+ concurrent queries with <3s p95 latency
@@ -227,6 +245,33 @@ See [benchmarks/](benchmarks/) directory for detailed metrics:
 - Multi-hop reasoning: GraphRAG only ✅
 - Availability logic: GraphRAG only ✅
 - High concurrency: GraphRAG optimized ✅
+
+## 🔮 Future Roadmap: Real-Time RFP Integration
+
+To move from MVP to Production, the following architecture is planned:
+
+1. **Webhook Listener**: REST endpoint to receive RFPs from external systems (Upwork, email parsers, etc.)
+2. **Message Queue** (RabbitMQ/Kafka): Buffer incoming CVs/RFPs for async processing, decoupled from `bi_engine`
+3. **Auto-Matching Worker**: Background service triggering `bi_engine` on ingestion to find candidate matches
+4. **HR Notifications**: Alert HR via Slack/Teams with matched teams and estimated project cost
+5. **LangSmith Tracing**: Production monitoring (already configured in `.env` with `LANGCHAIN_TRACING_V2=true`)
+6. **Multi-tenant Support**: Isolate data by tenant in Neo4j using graph partitioning
+
+## 🧪 Testing & Quality Assurance
+
+The project includes a robust testing suite in the `benchmarks/` folder:
+
+- **Scalability Testing**: `6_stress_test_scalability.py` validates system performance with 600+ nodes
+- **Throughput Testing**: `7_throughput_test.py` ensures the API handles concurrent requests under load
+- **Database Cleanup**: `8_cleanup_clones.py` resets the database to clean state instantly
+
+Run all tests:
+```bash
+cd benchmarks
+python 5_compare_systems.py   # Accuracy comparison
+python 6_stress_test_scalability.py   # Load testing
+python 7_throughput_test.py   # Concurrency test
+```
 
 ## � Monitoring & Metrics
 
