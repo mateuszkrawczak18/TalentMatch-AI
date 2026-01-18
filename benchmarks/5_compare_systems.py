@@ -4,8 +4,13 @@ import sys
 import importlib.util
 from dotenv import load_dotenv
 
+# --- MAGICZNY NAGŁÓWEK ---
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
 # Ładowanie zmiennych środowiskowych
-load_dotenv()
+load_dotenv(os.path.join(parent_dir, ".env"))
 
 def import_module_from_file(module_name, file_path):
     if not os.path.exists(file_path):
@@ -19,13 +24,16 @@ def import_module_from_file(module_name, file_path):
 
 print("🔄 Loading modules dynamically...")
 try:
-    # 1. Ładujemy Twój Inteligentny Agent
-    import sys
-    sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+    # 1. Ładujemy Twój Inteligentny Agent (z folderu src/ w głównym katalogu)
+    # parent_dir/src -> graph_agent
+    src_path = os.path.join(parent_dir, 'src')
+    sys.path.append(src_path)
     from graph_agent import TalentAgent
     
-    # 2. Ładujemy Naive RAG
-    naive_module = import_module_from_file("naive_module", "4_naive_rag_cv.py")
+    # 2. Ładujemy Naive RAG (z tego samego folderu benchmarks/)
+    # Ponieważ plik jest obok, używamy current_dir
+    naive_path = os.path.join(current_dir, "4_naive_rag_cv.py")
+    naive_module = import_module_from_file("naive_module", naive_path)
     NaiveRAGSystem = naive_module.NaiveRAGSystem
     print("✅ Modules loaded successfully.")
 except Exception as e:

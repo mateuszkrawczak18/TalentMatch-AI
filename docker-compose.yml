@@ -1,17 +1,52 @@
+version: '3.8'
+
 services:
+  # --- BAZA DANYCH (Twoja konfiguracja + Healthcheck) ---
   neo4j:
     image: neo4j:5.11.0
     container_name: neo4j_graphrag
     restart: unless-stopped
     ports:
-      - "7474:7474" # HTTP dla przeglądarki
-      - "7687:7687" # Bolt dla połączenia z Pythonem
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
     environment:
       - NEO4J_AUTH=neo4j/password123
-      - NEO4J_PLUGINS=["apoc"]
-      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
-      # Ustawienia pamięci (optymalne na start)
+      # Dodałem graph-data-science, bo to standard w GraphRAG (nie zaszkodzi)
+      - NEO4J_PLUGINS=["apoc", "graph-data-science"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
       - NEO4J_dbms_memory_heap_initial__size=512m
       - NEO4J_dbms_memory_heap_max__size=1G
     volumes:
       - ./neo4j_data:/data
+    # Healthcheck sprawdza czy baza żyje, zanim odpali API
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- BACKEND API (Nowy serwis) ---
+  backend:
+    build: .
+    container_name: talentmatch_api
+    restart: unless-stopped
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    ports:
+      - "8000:8000" # Wystawiamy API na świat
+    environment:
+      # WAŻNE: Wewnątrz sieci Docker hostem bazy jest nazwa serwisu "neo4j", nie "localhost"
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USERNAME=neo4j
+      - NEO4J_PASSWORD=password123
+      # Przekazujemy klucze Azure/OpenAI z Twojego pliku .env na hoście
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_DEPLOYMENT_NAME=${AZURE_DEPLOYMENT_NAME}
+      - AZURE_EMBEDDING_DEPLOYMENT=${AZURE_EMBEDDING_DEPLOYMENT}
+      - OPENAI_API_VERSION=${OPENAI_API_VERSION}
+    volumes:
+      # Montujemy plik logów, żebyś miał do niego dostęp z Windowsa
+      - ./system_metrics.log:/app/system_metrics.log

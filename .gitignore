@@ -11,6 +11,16 @@ __pycache__/
 .DS_Store       # Mac
 Thumbs.db       # Windows
 Desktop.ini     # Windows
+.mypy_cache/    # MyPy type checking cache
+
+# --- TESTING & COVERAGE ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.hypothesis/
 
 # --- VIRTUAL ENVIRONMENTS ---
 venv/
@@ -39,14 +49,51 @@ embeddings_cache/
 # --- GENERATED DATA (PDFs) ---
 data/cvs/*.pdf
 data/rfps/*.pdf
+data/*/metadata.json
+data/*/cache/
+
+# --- BENCHMARK RESULTS & REPORTS ---
+benchmarks/*.csv
+benchmarks/*.json
+benchmarks/results/
+benchmarks/*.png
+benchmarks/reports/
+results/
+*.xlsx
+*.html
+
+# --- SYSTEM METRICS & LOGS ---
+system_metrics.log
+*.log.gz
+logs/
+metrics/
+
+# --- DOCKER & CONTAINERS ---
+docker-compose.override.yml
+docker_volumes/
+.docker/
+
+# --- TEMPORARY & BUILD FILES ---
+*.tmp
+*.temp
+*.bak
+*.pkl
+build/
+dist/
+*.egg-info/
+
+# --- ASSET EXCEPTIONS (Images to Include) ---
+!logo.png
+!data/cvs/.gitkeep
+!data/rfps/.gitkeep
+!benchmarks/.gitkeep
 
 # --- LOCAL DATABASES ---
 data/db/
 
 
 # --- PROJECT DOCUMENTATION ---
-PRD.md
-PROJECT_INSTRUCTIONS.md
-
-# Jeśli zdecydujesz, że DEMO_SCRIPT też jest prywatny, odkomentuj linię niżej:
+# Keep these in repo (remove # if you want them private):
+# PRD.md
+# PROJECT_INSTRUCTIONS.md
 # DEMO_SCRIPT.md

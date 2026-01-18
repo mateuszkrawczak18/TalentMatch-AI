@@ -22,19 +22,18 @@ class TalentAgent:
         # Odświeżenie schematu
         self.graph.refresh_schema()
 
-        # 2. Model LLM (Wersja Stabilna)
+        # 2. Model LLM
         self.llm = AzureChatOpenAI(
             azure_deployment=os.getenv("AZURE_DEPLOYMENT_NAME"),
             api_version=os.getenv("OPENAI_API_VERSION"),
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
             api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-            temperature=0,
-            max_retries=5,       # Ponawianie przy błędach sieci
-            request_timeout=60   # Dłuższy czas na odpowiedź
+            temperature=0,                   
+            max_retries=5,
+            request_timeout=60
         )
 
         # 3. PROMPT GENERUJĄCY KOD CYPHER
-        # Używamy {{ }} dla właściwości w schemacie
         cypher_template = """Task: Generate Cypher statement to query a graph database.
         
         Definition of Schema:
@@ -47,18 +46,24 @@ class TalentAgent:
           - (:Person)-[:STUDIED_AT {{degree}}]->(:University)
           - (:Person)-[:HAS_CERT]->(:Certification)
         
-        Context:
-        - Current Date: {today}
-        
         Instructions:
         1. Use ONLY the provided schema.
         2. Do not include preambles.
         3. For "Availability", check if a person is NOT assigned to a Project.
         4. Keep queries concise.
-        5. CRITICAL: When listing people based on criteria (e.g. Senior Python), ALWAYS return the proving attributes (p.seniority, s.name, p.rate) in the result so I can verify the match.
+        5. CRITICAL: When listing people based on criteria, ALWAYS return the proving attributes (p.seniority, s.name, p.rate).
+        6. NO SLICING: Do NOT limit lists using syntax like [0..2] or [0..5]. Return ALL matching nodes.
+        7. NO DATE FILTERING: Do NOT use 'start_date', 'date()', or check timeframes unless the user explicitly asks for a specific date in the question.
+        8. RETURN FULL LISTS: If the user asks for people/projects, generate a query that returns ALL of them.
+        9. OR LOGIC: If the user asks about multiple projects (e.g. "Project A and Project B"), use "OR" logic or the "IN" operator for project names. Do NOT match the same person to multiple projects simultaneously unless explicitly asked.
         
         Examples:
         
+        Q: Who is assigned to Project Alpha and Project Beta?
+        A: MATCH (p:Person)-[:ASSIGNED_TO]->(proj:Project)
+           WHERE proj.name IN ['Project Alpha', 'Project Beta']
+           RETURN p.name, proj.name as project
+
         Q: Find Senior Python Developers.
         A: MATCH (p:Person)-[:HAS_SKILL]->(s:Skill) 
            WHERE p.seniority = 'Senior' AND s.name = 'Python' 
@@ -85,25 +90,24 @@ class TalentAgent:
         
         cypher_prompt = PromptTemplate(
             template=cypher_template, 
-            input_variables=["question", "today"]
+            input_variables=["question"]
         )
 
         # 4. PROMPT QA
-        qa_template = """You are an intelligent IT Staffing Consultant.
+        qa_template = """You are an HR Staffing Assistant.
+        You have queried the Neo4j database and received the following JSON data in the "Context" section.
         
-        Context (Database Results):
-        {context}
-        
-        User Question:
-        {question}
-        
-        Instructions:
-        - Answer based ONLY on the provided context.
-        - If the user asks for specific roles/skills and the context contains data, assume it is correct.
-        - Format lists of people nicely (bullet points).
-        - If the context is empty, say "No matching candidates found."
-        
-        Answer:"""
+        CRITICAL RULES:
+        1. The data in "Context" IS the correct answer. Use it directly.
+        2. If the Context lists people/projects, list ALL of them in your answer using bullet points. Do not summarize or count them if a list is requested.
+        3. If the Context is a list of people for an "availability" question, assume these ARE the available people.
+        4. Do NOT say "The provided context does not include..." or "I cannot determine...".
+        5. If the Context is empty, assume there are no results matching the criteria.
+
+        Question: {question}
+        Context: {context}
+
+        Helpful Answer:"""
         
         qa_prompt = PromptTemplate(
             template=qa_template, 
@@ -111,21 +115,27 @@ class TalentAgent:
         )
 
         self.chain = GraphCypherQAChain.from_llm(
-            self.llm,
+            llm=self.llm,
             graph=self.graph,
             verbose=True,
             cypher_prompt=cypher_prompt,
             qa_prompt=qa_prompt,
-            allow_dangerous_requests=True
+            allow_dangerous_requests=True,
+            validate_cypher=True,
+            top_k=100
         )
 
     def ask(self, question: str):
         try:
-            today_str = date.today().isoformat()
-            response = self.chain.invoke({"query": question, "today": today_str})
+            response = self.chain.invoke({"query": question})
             return response['result']
         except Exception as e:
-            error_msg = str(e)
-            if "Connection error" in error_msg:
-                return "⚠️ Network Issue: Could not connect to Azure OpenAI. Please try again."
-            return f"System Error: {error_msg}"
+            if "temperature" in str(e):
+                self.llm.temperature = 1
+                try:
+                    response = self.chain.invoke({"query": question})
+                    return response['result']
+                except Exception as e2:
+                    return f"System Error (Retry failed): {str(e2)}"
+            
+            return f"System Error: {str(e)}"

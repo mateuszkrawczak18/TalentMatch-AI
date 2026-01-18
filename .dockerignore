@@ -1,0 +1,28 @@
+# Ignoruj środowisko wirtualne (najważniejsze!)
+venv/
+.venv/
+env/
+
+# Ignoruj historię gita
+.git/
+.gitignore
+
+# Ignoruj dane lokalne (nie chcemy ich w obrazie, będą montowane)
+data/
+neo4j_data/
+chroma_db/
+benchmarks/results/
+
+# Ignoruj cache Pythona
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignoruj pliki środowiskowe (bezpieczeństwo)
+.env
+.env.local
+
+# Inne śmieci
+.DS_Store
+Thumbs.db

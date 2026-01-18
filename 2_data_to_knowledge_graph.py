@@ -1,7 +1,7 @@
 import os
 import time
 import json
-import random  # <--- WAŻNE: Import do losowania stawek
+import random 
 from typing import List
 from dotenv import load_dotenv
 from langchain_neo4j import Neo4jGraph
@@ -10,7 +10,6 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
-
 load_dotenv()
 
 # --- KONFIGURACJA ZGODNA Z PRD ---
@@ -42,14 +41,21 @@ llm = AzureChatOpenAI(
     api_version=os.getenv("OPENAI_API_VERSION"),
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    temperature=0
+    temperature=1  # <--- ZMIANA: 1 wymagane dla modeli reasoning (gpt-5-nano/o1)
 )
 
 # Konfiguracja Neo4j
-url = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+# Używamy 127.0.0.1 zamiast localhost dla stabilności na Windows/Docker
+url = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")
 username = os.getenv("NEO4J_USERNAME", "neo4j")
 password = os.getenv("NEO4J_PASSWORD", "password123")
-graph = Neo4jGraph(url=url, username=username, password=password)
+
+try:
+    graph = Neo4jGraph(url=url, username=username, password=password)
+except Exception as e:
+    print(f"⚠️ Initial connection check failed: {e}")
+    print("Ensure Docker container is running and fully started.")
+    graph = None
 
 def extract_profile_from_cv(text: str):
     """Używa LLM do ekstrakcji profilu z mechanizmem RETRY (ponawiania)."""
@@ -89,6 +95,10 @@ def extract_profile_from_cv(text: str):
                 return None
 
 def ingest_cvs():
+    if not graph:
+        print("❌ Graph database connection not established. Aborting.")
+        return
+
     cv_folder = "data/cvs"
     if not os.path.exists(cv_folder):
         print(f"❌ Folder {cv_folder} does not exist. Run 1_generate_data.py first.")
