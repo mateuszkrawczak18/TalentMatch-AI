@@ -1,26 +1,33 @@
-# --- SECURITY ---
+# --- SECURITY (Klucze i hasła) ---
 .env
 .env.local
 .streamlit/secrets.toml
+config/secrets.yaml
+
+# --- DEPRECATED / LEGACY (Stary kod) ---
+legacy/
+src/
+old/
+archive/
+temp_scripts/
 
 # --- PYTHON & SYSTEM ---
 __pycache__/
 *.py[cod]
 *$py.class
-*.log
 .DS_Store       # Mac
+._* # Mac resource forks
 Thumbs.db       # Windows
 Desktop.ini     # Windows
 .mypy_cache/    # MyPy type checking cache
 
-# --- TESTING & COVERAGE ---
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-coverage.xml
-.tox/
-.hypothesis/
+# --- LOGS & MONITORING ---
+*.log
+*.log.gz
+system_metrics.log
+logs/
+metrics/
+celerybeat-schedule
 
 # --- VIRTUAL ENVIRONMENTS ---
 venv/
@@ -29,49 +36,66 @@ env/
 Lib/
 Scripts/
 
-# --- IDE SETTINGS (VS Code, PyCharm) ---
+# --- IDE SETTINGS ---
 .vscode/
 .idea/
 *.swp
 
 # --- DATABASE (Neo4j Docker & Local) ---
+# Ignorujemy ciężkie pliki bazy danych
 neo4j_data/
 neo4j_import/
 neo4j_plugins/
 neo4j_logs/
+data/db/
 
-# --- VECTOR STORE (Naive RAG Storage) ---
-faiss_index/
+# --- VECTOR STORE (ChromaDB / Faiss) ---
 chroma_db/
+faiss_index/
 vector_store/
 embeddings_cache/
 
-# --- GENERATED DATA (PDFs) ---
+# --- HUGGINGFACE & RAGAS CACHE ---
+# Cache modeli pobieranych przez biblioteki ewaluacyjne
+.cache/
+hf_cache/
+
+# --- GENERATED DATA (Dane syntetyczne) ---
+# Ignorujemy wygenerowane PDFy i metadane, ale zachowujemy strukturę folderów
 data/cvs/*.pdf
 data/rfps/*.pdf
+data/cvs/*.txt
+data/rfps/*.txt
 data/*/metadata.json
 data/*/cache/
 
 # --- BENCHMARK RESULTS & REPORTS ---
+# Ignorujemy wyniki testów (w tym nowe pliki CSV z Ragas), żeby repo było czyste
 benchmarks/*.csv
 benchmarks/*.json
-benchmarks/results/
 benchmarks/*.png
+benchmarks/results/
 benchmarks/reports/
 results/
 *.xlsx
 *.html
-
-# --- SYSTEM METRICS & LOGS ---
-system_metrics.log
-*.log.gz
-logs/
-metrics/
+# Konkretnie ignorujemy wyniki ewaluacji metryk
+benchmarks/ragas_evaluation_results.csv
+benchmarks/results_ragas_graph.csv
+benchmarks/results_ragas_naive.csv
 
 # --- DOCKER & CONTAINERS ---
 docker-compose.override.yml
 docker_volumes/
 .docker/
+
+# --- TESTING & COVERAGE ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
 
 # --- TEMPORARY & BUILD FILES ---
 *.tmp
@@ -82,18 +106,9 @@ build/
 dist/
 *.egg-info/
 
-# --- ASSET EXCEPTIONS (Images to Include) ---
+# --- ASSET EXCEPTIONS (Pliki, które MAJĄ być w repo) ---
 !logo.png
 !data/cvs/.gitkeep
 !data/rfps/.gitkeep
 !benchmarks/.gitkeep
-
-# --- LOCAL DATABASES ---
-data/db/
-
-
-# --- PROJECT DOCUMENTATION ---
-# Keep these in repo (remove # if you want them private):
-# PRD.md
-# PROJECT_INSTRUCTIONS.md
-# DEMO_SCRIPT.md
+!README.md

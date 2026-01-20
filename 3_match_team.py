@@ -243,10 +243,14 @@ class TeamMatcher:
         final_team = []
         if candidates:
             for member in candidates:
+                # ✅ KROK 3: Ustawienie daty końca (Time Awareness)
                 assign_query = """
                 MATCH (p:Person {name: $name}), (proj:Project {name: $proj_name})
                 MERGE (p)-[r:ASSIGNED_TO]->(proj)
-                SET r.allocation = $alloc, r.role = 'Developer', r.assigned_at = datetime()
+                SET r.allocation = $alloc, 
+                    r.role = 'Developer', 
+                    r.assigned_at = datetime(),
+                    r.end_date = datetime() + duration('P3M') 
                 """
                 try:
                     self.graph.query(assign_query, {

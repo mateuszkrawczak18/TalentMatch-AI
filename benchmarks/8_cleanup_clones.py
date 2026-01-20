@@ -1,42 +1,59 @@
 import os
 import time
 from dotenv import load_dotenv
-from langchain_community.graphs import Neo4jGraph
+from langchain_neo4j import Neo4jGraph
 
 # Ładowanie zmiennych środowiskowych
 load_dotenv()
 
 def clean_synthetic_data():
-    print("🧹 Connecting to Neo4j to clean up stress-test data...")
+    print("🧹 Starting FORCE CLEANUP of all stress-test remains...")
     
     try:
+        # Połączenie z Neo4j
         graph = Neo4jGraph(
-            url=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
+            url=os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687"),
             username=os.getenv("NEO4J_USERNAME", "neo4j"),
             password=os.getenv("NEO4J_PASSWORD", "password123")
         )
 
-        # 1. Sprawdź, ile jest klonów
-        count_query = "MATCH (n:Person) WHERE n.is_synthetic = true RETURN count(n) as count"
-        result = graph.query(count_query)
-        count = result[0]['count']
+        # 1. Agresywne zapytanie statystyczne (identyfikacja po flagach i nazwach)
+        stats_query = """
+        MATCH (n) 
+        WHERE n.is_synthetic = true 
+           OR (n:Project AND (n.name STARTS WITH 'StressActive' OR n.name STARTS WITH 'StressHist'))
+           OR (n:Person AND n.name CONTAINS '(Gen ')
+        RETURN labels(n)[0] as type, count(n) as count
+        """
+        stats = graph.query(stats_query)
 
-        if count == 0:
-            print("✅ Database is already clean! No synthetic clones found.")
+        if not stats:
+            print("✅ Database is already clean! No synthetic or stress-related data found.")
             return
 
-        print(f"⚠️  Found {count} synthetic clones (created by Stress Test). Deleting them now...")
+        print("⚠️  Found the following entities to be removed:")
+        total_count = 0
+        for item in stats:
+            print(f"   - {item['type']}: {item['count']}")
+            total_count += item['count']
 
-        # 2. Usuń tylko klony (flaga is_synthetic)
+        # 2. Usuwanie WSZYSTKIEGO co pasuje do wzorca testów obciążeniowych
+        # Używamy DETACH DELETE, aby usunąć krawędzie (np. puste projekty bez ludzi)
         delete_query = """
         MATCH (n)
-        WHERE n.is_synthetic = true
+        WHERE n.is_synthetic = true 
+           OR (n:Project AND (n.name STARTS WITH 'StressActive' OR n.name STARTS WITH 'StressHist'))
+           OR (n:Person AND n.name CONTAINS '(Gen ')
         DETACH DELETE n
         """
-        graph.query(delete_query)
         
-        print(f"♻️  Success! {count} clones removed.")
-        print("✅ Database restored to original state (Real Candidates only).")
+        print("\n⏳ Processing deletion... (this may take a few seconds)")
+        start_time = time.time()
+        graph.query(delete_query)
+        duration = round(time.time() - start_time, 2)
+        
+        print(f"♻️  Success! Removed {total_count} entities in {duration}s.")
+        print("✅ Database restored to original state (Real Candidates & Real Projects only).")
 
     except Exception as e:
         print(f"❌ Error during cleanup: {e}")

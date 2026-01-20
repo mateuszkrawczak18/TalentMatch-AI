@@ -1,107 +1,131 @@
-import sys
 import os
 import time
 import random
 from dotenv import load_dotenv
-
-# --- MAGICZNY NAGŁÓWEK ---
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
-
-# Ładowanie .env
-load_dotenv(os.path.join(parent_dir, ".env"))
-
 from langchain_neo4j import Neo4jGraph
 
-# Połączenie z Neo4j
-graph = Neo4jGraph(
-    url=os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687"),
-    username=os.getenv("NEO4J_USERNAME", "neo4j"),
-    password=os.getenv("NEO4J_PASSWORD", "password123")
-)
+load_dotenv()
 
-def inject_dummy_data(target_count=600):
-    print(f"\n🚀 STRESS TEST: Scalability Check (Target: {target_count}+ nodes)")
+# Konfiguracja
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")
+NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password123")
+
+def run_stress_test():
+    print("\n🚀 STRESS TEST: Scalability Check (Target: 600+ nodes)")
     
+    try:
+        graph = Neo4jGraph(url=NEO4J_URI, username=NEO4J_USERNAME, password=NEO4J_PASSWORD)
+    except Exception as e:
+        print(f"❌ Connection Failed: {e}")
+        return
+
     # 1. Sprawdź obecny stan
-    try:
-        current_count = graph.query("MATCH (p:Person) RETURN count(p) as c")[0]['c']
-    except Exception as e:
-        print(f"❌ Connection failed: {e}")
-        return
+    count_query = "MATCH (p:Person) RETURN count(p) as cnt"
+    current_count = graph.query(count_query)[0]['cnt']
+    print(f"    📊 Current Database Size: {current_count} people")
 
-    print(f"   📊 Current Database Size: {current_count} people")
-    
+    target_count = 600
     if current_count >= target_count:
-        print("   ✅ Requirement Met: Database already has > 500 profiles.")
-        return
-
-    needed = target_count - current_count
-    print(f"   💉 Injecting {needed} synthetic profiles (Cloning existing data)...")
-
-    # 2. Masowe Klonowanie (Cypher Batch)
-    # Klonujemy węzły, dodając losowy suffix do ID, żeby były unikalne
-    query = """
-    MATCH (p:Person)-[:HAS_SKILL]->(s:Skill)
-    WITH p, collect(s) as skills
-    LIMIT 30  // Bierzemy wzorzec z pierwszych 30 prawdziwych CV
-    
-    UNWIND range(1, $multiplier) as i
-    CREATE (new_p:Person)
-    SET new_p = p
-    SET new_p.id = p.id + '_Clone_' + toString(i) + '_' + toString(rand())
-    SET new_p.name = p.name + ' (Clone ' + toString(i) + ')'
-    SET new_p.is_synthetic = true
-    
-    FOREACH (skill in skills | 
-        MERGE (sk:Skill {name: skill.name}) 
-        MERGE (new_p)-[:HAS_SKILL]->(sk)
-    )
-    """
-    
-    # Obliczamy ile razy trzeba pomnożyć te 30 osób
-    multiplier = (needed // 30) + 2
-    
-    print("   ⏳ Running batch insertion (this might take 10-20s)...")
-    start_time = time.time()
-    try:
-        graph.query(query, {"multiplier": multiplier})
-    except Exception as e:
-        print(f"❌ Error during injection: {e}")
-        return
+        print("    ✅ Database already large enough. Skipping injection.")
+    else:
+        # Oblicz mnożnik, żeby przebić 600
+        needed = target_count - current_count
+        # Obliczenie mnożnika: $multiplier = \text{int}\left(\left(\frac{needed}{current\_count}\right) \times 1.2\right) + 1$
+        multiplier = int((needed / current_count) * 1.2) + 1  
         
-    end_time = time.time()
-    
-    # Weryfikacja
-    final_count = graph.query("MATCH (p:Person) RETURN count(p) as c")[0]['c']
-    print(f"   ✅ Injection Complete in {end_time - start_time:.2f}s")
-    print(f"   🎉 Final Database Size: {final_count} people")
+        print(f"    💉 Injecting synthetic profiles (Multiplier: x{multiplier})...")
+        print("    ⏳ Running injection (This forces Active/Historical projects)...")
+        
+        start_inj = time.time()
+        
+        # --- ZMIANA: Dodanie is_synthetic do projektów ---
+        injection_cypher = """
+        MATCH (p:Person)
+        WITH collect(p) as people
+        UNWIND people as p
+        UNWIND range(1, $multiplier) as i
+        
+        // A. Klonowanie Osoby
+        CREATE (new_p:Person)
+        SET new_p = properties(p)
+        SET new_p.id = p.id + '_Gen_' + toString(i) + '_' + toString(rand())
+        SET new_p.name = p.name + ' (Gen ' + toString(i) + ')'
+        SET new_p.is_synthetic = true
+        
+        // B. Klonowanie Skilli
+        WITH new_p, p, i
+        OPTIONAL MATCH (p)-[:HAS_SKILL]->(s:Skill)
+        FOREACH (ignoreMe IN CASE WHEN s IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (sk:Skill {id: s.id})
+            MERGE (new_p)-[:HAS_SKILL]->(sk)
+        )
+        FOREACH (ignoreMe IN CASE WHEN s IS NULL THEN [1] ELSE [] END |
+            MERGE (sk:Skill {id: 'Python'})
+            MERGE (new_p)-[:HAS_SKILL]->(sk)
+        )
 
-def benchmark_query_speed():
+        // C. WYMUSZENIE PROJEKTÓW (Z FLAGĄ IS_SYNTHETIC)
+        // Każdy klon dostaje 1 aktywny projekt
+        MERGE (ap:Project {name: 'StressActive_' + toString(new_p.id)})
+        SET ap.status = 'Active', 
+            ap.is_synthetic = true  // <--- KLUCZOWA POPRAWKA
+        MERGE (new_p)-[:ASSIGNED_TO {
+            role: 'Developer',
+            allocation: 1.0,
+            start_date: date(),
+            end_date: date() + duration('P6M')
+        }]->(ap)
+
+        // Każdy klon dostaje 1 historyczny projekt
+        MERGE (hp:Project {name: 'StressHist_' + toString(new_p.id)})
+        SET hp.status = 'Closed', 
+            hp.is_synthetic = true  // <--- KLUCZOWA POPRAWKA
+        MERGE (new_p)-[:ASSIGNED_TO {
+            role: 'Junior',
+            allocation: 0.0,
+            start_date: date() - duration('P2Y'),
+            end_date: date() - duration('P1Y')
+        }]->(hp)
+        """
+        
+        graph.query(injection_cypher, params={"multiplier": multiplier})
+        
+        time_inj = time.time() - start_inj
+        print(f"    ✅ Injection Complete in {time_inj:.2f}s")
+
+    # 2. Weryfikacja
+    final_people = graph.query("MATCH (p:Person) RETURN count(p) as cnt")[0]['cnt']
+    active_proj = graph.query("MATCH (p:Project {status: 'Active'}) RETURN count(p) as cnt")[0]['cnt']
+    closed_proj = graph.query("MATCH (p:Project {status: 'Closed'}) RETURN count(p) as cnt")[0]['cnt']
+
+    print(f"    🎉 Final Stats:")
+    print(f"      - People:          {final_people} (Target: >600)")
+    print(f"      - Active Projects: {active_proj} (Target: >50)")
+    print(f"      - Closed Projects: {closed_proj} (Target: >100)")
+
+    # 3. Testy Wydajności
     print("\n⏱️ PERFORMANCE CHECK: Database Latency")
     
-    # Testujemy proste wyszukiwanie w dużej bazie
-    start = time.time()
-    result = graph.query("""
-        MATCH (p:Person)-[:HAS_SKILL]->(s:Skill)
-        WHERE toLower(s.name) = 'python'
-        RETURN count(p) as count
+    t1_start = time.time()
+    res1 = graph.query("MATCH (p:Person)-[:HAS_SKILL]->(s:Skill) WHERE toLower(s.id) CONTAINS 'python' RETURN count(p) as cnt")
+    t1_end = time.time()
+    print(f"    Test 1 (Simple Filter): Find Python Devs ({res1[0]['cnt']} hits)")
+    print(f"      ⏱️ Time: {t1_end - t1_start:.4f}s")
+
+    t2_start = time.time()
+    res2 = graph.query("""
+        MATCH (p:Person)-[r:ASSIGNED_TO]->(pr:Project {status: 'Active'})
+        RETURN count(p) as total_active
     """)
-    end = time.time()
-    duration = end - start
-    
-    count = result[0]['count']
-    print(f"   🔍 Query: Find all Python Developers in dataset of {count} people.")
-    print(f"   ⏱️ Execution Time: {duration:.4f} seconds")
-    
-    if duration < 0.1:
-        print("   ✅ RESULT: PASS (Database is blazing fast, < 0.1s)")
-    elif duration < 2.0:
-        print("   ✅ RESULT: PASS (< 2.0s limit met)")
+    t2_end = time.time()
+    print(f"    Test 2 (Aggregation): Count Active Assignments ({res2[0]['total_active']} hits)")
+    print(f"      ⏱️ Time: {t2_end - t2_start:.4f}s")
+
+    if (t1_end - t1_start) < 0.1 and (t2_end - t2_start) < 0.2:
+        print("    ✅ RESULT: PASS (Blazing fast < 100ms)")
     else:
-        print("   ⚠️ RESULT: SLOW (> 2.0s)")
+        print("    ⚠️ RESULT: WARNING (Check indexes)")
 
 if __name__ == "__main__":
-    inject_dummy_data()
-    benchmark_query_speed()
+    run_stress_test()

@@ -4,35 +4,36 @@ import glob
 import time
 from dotenv import load_dotenv
 
-# --- MAGICZNY NAGŁÓWEK: Naprawa ścieżek dla folderu benchmarks/ ---
+# --- MAGICZNY NAGŁÓWEK: Naprawa ścieżek ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-# Ładowanie .env z głównego folderu
 load_dotenv(os.path.join(parent_dir, ".env"))
 
-# Definicje ścieżek
 DATA_DIR = os.path.join(parent_dir, "data")
 CHROMA_DB_DIR = os.path.join(parent_dir, "chroma_db")
 
-# Importy LangChain
+# --- BEZPIECZNE IMPORTY (LCEL) ---
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from langchain_chroma import Chroma
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
 
 class NaiveRAGSystem:
     def __init__(self):
-        # 1. Konfiguracja Embeddingów
+        # 1. Embeddingi
         self.embeddings = AzureOpenAIEmbeddings(
-            azure_deployment=os.getenv("AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-3-small"),
+            azure_deployment=os.getenv("AZURE_EMBEDDING_NAME", "text-embedding-3-small"),
             api_version=os.getenv("OPENAI_API_VERSION"),
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
             api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         )
         
-        # 2. Konfiguracja Modelu Chat (Temperature=1 dla modeli reasoning)
+        # 2. Model Chat
         self.llm = AzureChatOpenAI(
             azure_deployment=os.getenv("AZURE_DEPLOYMENT_NAME"),
             api_version=os.getenv("OPENAI_API_VERSION"),
@@ -42,11 +43,11 @@ class NaiveRAGSystem:
         )
         
         self.vectorstore = None
+        self.persist_directory = CHROMA_DB_DIR
 
     def ingest_data(self):
+        """Wczytuje PDFy i buduje bazę."""
         print("   📥 [Naive RAG] Loading PDFs...")
-        
-        # FIX: Używamy dynamicznej ścieżki do folderu data/cvs
         pdf_path = os.path.join(DATA_DIR, "cvs", "*.pdf")
         files = glob.glob(pdf_path)
         
@@ -66,71 +67,86 @@ class NaiveRAGSystem:
             print("❌ No valid documents loaded.")
             return False
             
-        # Cięcie tekstu
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
         splits = text_splitter.split_documents(documents)
         
-        # Baza wektorowa (Chroma) z mechanizmem RETRY
         print(f"   Creating Embeddings for {len(splits)} chunks...")
         
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                # FIX: Zapisujemy bazę w głównym katalogu (CHROMA_DB_DIR)
-                self.vectorstore = Chroma.from_documents(
-                    documents=splits, 
-                    embedding=self.embeddings,
-                    collection_name="cv_collection",
-                    persist_directory=CHROMA_DB_DIR
-                )
-                print("   ✅ Vector Store ready.")
-                return True
-            except Exception as e:
-                print(f"   ⚠️ Connection Error (Attempt {attempt+1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    print("   ⏳ Waiting 5s before retrying...")
-                    time.sleep(5)
-                else:
-                    print(f"❌ Failed to create Vector Store after {max_retries} attempts.")
-                    return False
+        try:
+            self.vectorstore = Chroma.from_documents(
+                documents=splits, 
+                embedding=self.embeddings,
+                collection_name="cv_collection",
+                persist_directory=self.persist_directory
+            )
+            print("   ✅ Vector Store ready.")
+            return True
+        except Exception as e:
+            print(f"❌ Failed to create Vector Store: {e}")
+            return False
 
     def query(self, question):
+        """Zadaje pytanie używając LCEL (Modern LangChain)."""
+        # Inicjalizacja bazy
         if not self.vectorstore:
-            print("⚠️ System not initialized.")
-            return
+            try:
+                self.vectorstore = Chroma(
+                    persist_directory=self.persist_directory,
+                    embedding_function=self.embeddings,
+                    collection_name="cv_collection"
+                )
+            except Exception:
+                return "Error: Vector Store not initialized."
 
         try:
-            # KROK 1: Retrieval
-            docs = self.vectorstore.similarity_search(question, k=5)
-            context_text = "\n\n".join([d.page_content for d in docs])
+            # Tworzymy retriever
+            retriever = self.vectorstore.as_retriever(search_kwargs={"k": 4})
             
-            # KROK 2: Generation
-            prompt = f"""
-            You are a helpful HR Assistant. Answer the question based ONLY on the context provided below.
-            If the answer is not in the context, say "I don't know".
-            
-            CONTEXT:
-            {context_text}
-            
-            QUESTION:
-            {question}
+            # Definiujemy Prompt
+            template = """Answer the question based only on the following context:
+            {context}
+
+            Question: {question}
             """
+            prompt = ChatPromptTemplate.from_template(template)
             
-            response = self.llm.invoke(prompt)
-            answer = response.content
+            # --- TWORZYMY ŁAŃCUCH (LCEL) ---
+            # To zastępuje stare RetrievalQA i omija błędy importu
+            def format_docs(docs):
+                return "\n\n".join([d.page_content for d in docs])
+
+            chain = (
+                {"context": retriever | format_docs, "question": RunnablePassthrough()}
+                | prompt
+                | self.llm
+                | StrOutputParser()
+            )
             
-            # Printujemy tylko odpowiedź
-            print(f"Result: {answer}")
-            return answer
+            # Uruchamiamy łańcuch
+            response = chain.invoke(question)
+            return response.strip()
             
         except Exception as e:
-            print(f"❌ Error: {e}")
-            return "Error"
+            return f"Error: {e}"
 
 if __name__ == "__main__":
     rag = NaiveRAGSystem()
-    if rag.ingest_data():
-        print("\n🔎 Smoke Tests:")
-        rag.query("Who is experienced in Python?")
-        rag.query("How many developers are located in London?") 
-        rag.query("Who is currently available (not busy)?")
+    
+    # Próbujemy załadować lub zbudować bazę
+    if not os.path.exists(CHROMA_DB_DIR) or not os.listdir(CHROMA_DB_DIR):
+        rag.ingest_data()
+    
+    # SMOKE TESTS
+    test_questions = [
+        "Find a candidate with Java skills.",
+        "How many candidates are located in London?",
+        "What is the average hourly rate of Senior Developers?"
+    ]
+    
+    print("\n🔎 Smoke Tests (Verification):")
+    for q in test_questions:
+        print("-" * 60)
+        print(f"❓ Question: {q}")
+        answer = rag.query(q)
+        print(f"💡 Answer:   {answer}")
+    print("-" * 60)
