@@ -48,10 +48,12 @@ def run_stress_test():
         
         // A. Klonowanie Osoby
         CREATE (new_p:Person)
-        SET new_p = properties(p)
-        SET new_p.id = p.id + '_Gen_' + toString(i) + '_' + toString(rand())
-        SET new_p.name = p.name + ' (Gen ' + toString(i) + ')'
-        SET new_p.is_synthetic = true
+        SET new_p = p {
+            .*,
+            id: p.id + '_Gen_' + toString(i) + '_' + toString(rand()),
+            name: p.name + ' (Gen ' + toString(i) + ')',
+            is_synthetic: true
+        }
         
         // B. Klonowanie Skilli
         WITH new_p, p, i

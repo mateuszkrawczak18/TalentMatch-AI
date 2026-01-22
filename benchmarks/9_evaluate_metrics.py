@@ -130,11 +130,8 @@ def run_benchmark():
         # --- A. GRAPH RAG ---
         g_resp = graph_engine.answer_question(q)
         g_ans = g_resp.get('natural_answer', "Error")
-        decoder = g_resp.get('decoder_map', {})
-        for k, v in decoder.items():
-            g_ans = g_ans.replace(k, v)
         
-        # Kontekst GraphRAG = wynik zapytania JSON
+        # Context extraction and cleanup
         g_ctx = [str(g_resp.get('result', {}))]
         
         data_graph["question"].append(q)
@@ -148,9 +145,9 @@ def run_benchmark():
         # Tutaj wyciągamy prawdziwe dokumenty z bazy wektorowej!
         # Używamy retrievera z systemu Naive
         try:
-            # Zakładamy, że naive_system ma dostęp do swojego vector_store
+            # Zakładamy, że naive_system ma dostęp do swojego vectorstore
             # Jeśli nie, tworzymy retriever ad-hoc
-            retriever = naive_system.vector_store.as_retriever(search_kwargs={"k": 3})
+            retriever = naive_system.vectorstore.as_retriever(search_kwargs={"k": 3})
             retrieved_docs = retriever.invoke(q)
             n_ctx = [doc.page_content for doc in retrieved_docs]
         except:

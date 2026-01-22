@@ -5,6 +5,9 @@ WORKDIR /app
 # Instalacja narzędzi systemowych
 RUN apt-get update && apt-get install -y build-essential curl && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip do najnowszej wersji
+RUN pip install --upgrade pip
+
 # Kopiowanie zależności i instalacja
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

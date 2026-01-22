@@ -10,19 +10,19 @@ A comprehensive **GraphRAG pipeline** for staffing: synthetic CV/RFP generation 
 
 ## 🛠️ Tech Stack
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Database** | Neo4j 5.x | Graph database for knowledge representation |
-| **LLM** | Azure OpenAI (GPT-5-Nano/o1) | Logic/Reasoning & Natural language generation |
-| **Embeddings** | text-embedding-3-small | Vector baseline for Naive RAG comparison |
-| **Framework** | LangChain | Agent orchestration and prompt engineering |
-| **Frontend** | Streamlit | Interactive web interface |
-| **Visualization** | **Streamlit-agraph** | Interactive physics-based graph rendering |
-| **Privacy** | **Hashlib / Custom Logic** | PII Masking & Pseudonymization (GDPR) |
-| **PDF Processing** | PyPDF, ReportLab | CV generation and parsing |
-| **Synthetic Data** | Faker | Realistic CV generation |
-| **Data Handling** | **Pandas** | Data manipulation & analytics |
-| **Vector Store** | ChromaDB | Naive RAG baseline implementation |
+| Component          | Technology                   | Purpose                                       |
+| ------------------ | ---------------------------- | --------------------------------------------- |
+| **Database**       | Neo4j 5.x                    | Graph database for knowledge representation   |
+| **LLM**            | Azure OpenAI (GPT-5-Nano/o1) | Logic/Reasoning & Natural language generation |
+| **Embeddings**     | text-embedding-3-small       | Vector baseline for Naive RAG comparison      |
+| **Framework**      | LangChain                    | Agent orchestration and prompt engineering    |
+| **Frontend**       | Streamlit                    | Interactive web interface                     |
+| **Visualization**  | **Streamlit-agraph**         | Interactive physics-based graph rendering     |
+| **Privacy**        | **Hashlib / Custom Logic**   | PII Masking & Pseudonymization (GDPR)         |
+| **PDF Processing** | PyPDF, ReportLab             | CV generation and parsing                     |
+| **Synthetic Data** | Faker                        | Realistic CV generation                       |
+| **Data Handling**  | **Pandas**                   | Data manipulation & analytics                 |
+| **Vector Store**   | ChromaDB                     | Naive RAG baseline implementation             |
 
 ## 📂 Project Structure
 
@@ -67,34 +67,38 @@ TalentMatch-AI/
 
 ### ✅ MVP Requirements (PRD Section 3.1.2)
 
-| Requirement | Implementation | Status |
-|-------------|----------------|--------|
-| **Graph database with HR entities** | Neo4j with 7 node types, 6 relationship types | ✅ Complete |
-| **Natural Language Queries** | Custom bi_engine with Azure OpenAI | ✅ Complete |
-| **Business Intelligence** | Aggregation, multi-hop, temporal, capacity queries | ✅ Complete |
-| **RFP Matching Engine** | Multi-criteria scoring with availability tracking | ✅ Complete |
-| **Baseline Comparison** | ChromaDB Naive RAG vs GraphRAG benchmarks | ✅ Complete |
-| **Data Generation Pipeline** | 30 CV PDFs + 3 RFPs with Faker + LLM | ✅ Complete |
-| **Web Interface** | Streamlit interactive chat & dashboard | ✅ Complete |
-| **Quantified Performance Metrics** | 6-scenario benchmark with accuracy percentages | ✅ Complete |
-| **REST API (Production)** | FastAPI with async support, logging, containerized | ✅ Complete |
-| **System Monitoring** | Real-time metrics logging to system_metrics.log | ✅ Complete |
+| Requirement                         | Implementation                                     | Status      |
+| ----------------------------------- | -------------------------------------------------- | ----------- |
+| **Graph database with HR entities** | Neo4j with 7 node types, 6 relationship types      | ✅ Complete |
+| **Natural Language Queries**        | Custom bi_engine with Azure OpenAI                 | ✅ Complete |
+| **Business Intelligence**           | Aggregation, multi-hop, temporal, capacity queries | ✅ Complete |
+| **RFP Matching Engine**             | Multi-criteria scoring with availability tracking  | ✅ Complete |
+| **Baseline Comparison**             | ChromaDB Naive RAG vs GraphRAG benchmarks          | ✅ Complete |
+| **Data Generation Pipeline**        | 30 CV PDFs + 3 RFPs with Faker + LLM               | ✅ Complete |
+| **Web Interface**                   | Streamlit interactive chat & dashboard             | ✅ Complete |
+| **Quantified Performance Metrics**  | 6-scenario benchmark with accuracy percentages     | ✅ Complete |
+| **REST API (Production)**           | FastAPI with async support, logging, containerized | ✅ Complete |
+| **System Monitoring**               | Real-time metrics logging to system_metrics.log    | ✅ Complete |
 
 ### 🚀 Advanced Enterprise Features
 
 **🛡️ GDPR & Data Privacy Mode**
+
 - Backend: `bi_engine.py` automatically hashes PII (e.g., names) into IDs (e.g., `Candidate_X92`) before sending data to OpenAI
 - Frontend: "Privacy Mode" toggle allows auditors to see masked data, while recruiters can see de-anonymized data locally
 
 **🕸️ Interactive Graph Visualization**
+
 - Integrated `streamlit-agraph` to render live nodes and edges directly in the browser
 - Allows visual exploration of connections (Person → Skill → Project)
 
 **🧠 Hybrid Temperature Strategy**
+
 - **Logic Model** (Temp=1): Uses Azure o1 / reasoning models for complex Cypher generation
 - **Creative Model** (Temp=1): Uses standard GPT models for natural language explanations
 
 **⏱️ Strict Business Logic**
+
 - **Bench**: People with NO active assignments
 - **Spare Capacity**: People with allocation < 1.0 (Partial availability)
 - Handles Active vs Historical projects based on `end_date`
@@ -157,7 +161,7 @@ python 3_match_team.py               # Runs scoring algorithm for new RFPs
 7. Benchmarks & Stress Testing (Crucial for Defense):
 
 ```bash
-# A. Build Baseline 
+# A. Build Baseline
 python benchmarks/4_naive_rag_cv.py
 
 # B. Comparison
@@ -198,6 +202,15 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 docker-compose down
 ```
 
+### 🔎 Smoke-Test Cypher (schema + data)
+
+Run these in Neo4j Browser to verify the PRD 4.3 schema is live:
+
+- Unique IDs present: `CALL db.constraints()` (check Person/Skill/Company/Project/RFP/University/Certification id uniqueness)
+- RFP→Project link: `MATCH (r:RFP)-[:CREATES]->(p:Project) RETURN r.title, p.title, p.status LIMIT 10`
+- Skills on pipeline projects: `MATCH (:Project {status:'New RFP'})-[r:REQUIRES]->(s:Skill) RETURN s.id, r.minimum_level, r.preferred_level LIMIT 10`
+- Capacity check: `MATCH (p:Person) OPTIONAL MATCH (p)-[r:ASSIGNED_TO]->(:Project) WITH p, sum(coalesce(r.allocation_percentage, coalesce(r.allocation,0))) AS load RETURN p.name, load LIMIT 10`
+
 ## 🌐 API Interface (Production)
 
 The **REST API** (`api.py`) provides machine-to-machine integration with:
@@ -209,6 +222,7 @@ The **REST API** (`api.py`) provides machine-to-machine integration with:
 - **Privacy Gateway**: Automatic PII masking before sending to LLM
 
 **Key API Routes:**
+
 - `POST /query` - Execute natural language query against graph
 - `POST /match-team` - Find optimal team for RFP
 - `GET /metrics` - Retrieve system performance metrics
@@ -220,25 +234,27 @@ The **REST API** (`api.py`) provides machine-to-machine integration with:
 
 We used the **Ragas** framework to mathematically evaluate retrieval quality on key scenarios.
 
-| Metric | GraphRAG (TalentMatch) | Naive RAG (Vector) | Interpretation |
-|---|---|---|---|
-| **Context Precision** | **0.98** | 0.35 | Graph retrieves exact nodes (0 noise). Vector retrieves unrelated text chunks. |
-| **Faithfulness** | **0.95** | 0.48 | GraphRAG answers are grounded in DB data. Naive RAG often hallucinates on math. |
-| **Answer Relevancy** | **0.92** | 0.75 | GraphRAG provides direct, structured answers. |
+| Metric                | GraphRAG (TalentMatch) | Naive RAG (Vector) | Interpretation                                                                  |
+| --------------------- | ---------------------- | ------------------ | ------------------------------------------------------------------------------- |
+| **Context Precision** | **0.98**               | 0.35               | Graph retrieves exact nodes (0 noise). Vector retrieves unrelated text chunks.  |
+| **Faithfulness**      | **0.95**               | 0.48               | GraphRAG answers are grounded in DB data. Naive RAG often hallucinates on math. |
+| **Answer Relevancy**  | **0.92**               | 0.75               | GraphRAG provides direct, structured answers.                                   |
 
 ### 2. Feature Comparison
+
 ### GraphRAG vs Traditional RAG Comparison
 
-| Feature / Scenario | Naive RAG (Vector) | GraphRAG (TalentMatch) | Winner |
-|---|---|---|---|
-| **Aggregation** (e.g., "Avg rate of Seniors") | ❌ Hallucinates or fails | ✅ 100% Accurate (math via DB) | **Graph** |
-| **Multi-hop Reasoning** (e.g., "Who worked with X?") | ❌ Misses connections | ✅ Traverses relationships | **Graph** |
-| **Availability Logic** (e.g., "Who is free now?") | ⚠️ Cannot verify state | ✅ Real-time status from DB | **Graph** |
-| **Boolean Filtering** (complex AND/OR queries) | ❌ Unreliable | ✅ Type-safe Cypher execution | **Graph** |
-| **Latency** (p95) | 0.8-1.5s | 1.5-2.5s | RAG (faster but less accurate) |
-| **Precision on Structured Data** | ~40% | 100% | **Graph** |
+| Feature / Scenario                                   | Naive RAG (Vector)       | GraphRAG (TalentMatch)         | Winner                         |
+| ---------------------------------------------------- | ------------------------ | ------------------------------ | ------------------------------ |
+| **Aggregation** (e.g., "Avg rate of Seniors")        | ❌ Hallucinates or fails | ✅ 100% Accurate (math via DB) | **Graph**                      |
+| **Multi-hop Reasoning** (e.g., "Who worked with X?") | ❌ Misses connections    | ✅ Traverses relationships     | **Graph**                      |
+| **Availability Logic** (e.g., "Who is free now?")    | ⚠️ Cannot verify state   | ✅ Real-time status from DB    | **Graph**                      |
+| **Boolean Filtering** (complex AND/OR queries)       | ❌ Unreliable            | ✅ Type-safe Cypher execution  | **Graph**                      |
+| **Latency** (p95)                                    | 0.8-1.5s                 | 1.5-2.5s                       | RAG (faster but less accurate) |
+| **Precision on Structured Data**                     | ~40%                     | 100%                           | **Graph**                      |
 
 **Reproduce Results:**
+
 ```bash
 python benchmarks/5_compare_systems.py
 ```
@@ -246,6 +262,7 @@ python benchmarks/5_compare_systems.py
 ### Detailed Metrics
 
 See [benchmarks/](benchmarks/) directory for detailed metrics:
+
 - **4_naive_rag_cv.py**: ChromaDB vector search baseline
 - **5_compare_systems.py**: GraphRAG vs Naive RAG accuracy/speed comparison
 - **6_stress_test_scalability.py**: Load testing (30→600 nodes, bottleneck analysis)
@@ -255,6 +272,7 @@ See [benchmarks/](benchmarks/) directory for detailed metrics:
 - **10_visualize_results.py**: Generate charts and visualizations from benchmark data
 
 ### Performance Summary
+
 - **GraphRAG precision**: 100% on structured queries (0 hallucinations)
 - **Naive RAG precision**: ~40% on complex queries
 - **GraphRAG latency**: 1.5-2.5s (includes Cypher generation + execution)
@@ -277,6 +295,7 @@ To move from MVP to Production, the following architecture is planned:
 The project includes a robust testing suite in the `benchmarks/` folder:
 
 **Volume Testing**: `6_stress_test_scalability.py` uses Deep Cloning to generate:
+
 - 600+ Candidate Profiles
 - 150+ Projects (Split: 50 Active, 100 Historical) to meet "Data Volume" requirements
 
@@ -285,6 +304,7 @@ The project includes a robust testing suite in the `benchmarks/` folder:
 **Database Cleanup**: `8_cleanup_clones.py` instantly resets the database to the clean state (removes synthetic nodes).
 
 Run all tests:
+
 ```bash
 cd benchmarks
 python 5_compare_systems.py   # Accuracy comparison
@@ -306,6 +326,7 @@ All system activity is automatically logged to `system_metrics.log`:
 - **User Analytics**: Query distribution, popular skills/roles, matching success rate
 
 **View live metrics:**
+
 ```bash
 tail -f system_metrics.log          # Stream metrics in real-time
 grep "ERROR" system_metrics.log     # Filter errors only
