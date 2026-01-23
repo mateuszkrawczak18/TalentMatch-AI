@@ -95,7 +95,7 @@ def query_knowledge_graph(request: QueryRequest, background_tasks: BackgroundTas
         raise HTTPException(status_code=500, detail=str(e))
 
     duration = time.time() - start_time
-    query_type = response.get("type", "unknown")
+    query_type = (response.get("plan", {}) or {}).get("query_type", "unknown")
 
     # Basic performance metric logging
     logging.info(

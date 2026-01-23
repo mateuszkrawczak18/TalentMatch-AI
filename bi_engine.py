@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import hashlib
 from datetime import date, datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -52,6 +53,7 @@ class QueryPlan(BaseModel):
     seniority: Optional[str] = None
     timezone: Optional[str] = None
     location: Optional[str] = None
+    bench_mode: bool = False
     availability: AvailabilityPlan = Field(default_factory=AvailabilityPlan)
     budget: BudgetPlan = Field(default_factory=BudgetPlan)
     team: TeamPlan = Field(default_factory=TeamPlan)
@@ -148,8 +150,12 @@ class BusinessIntelligenceEngine:
         rfp_keyword = None
         certification_mode = False
         project_mode = False
+        bench_mode = False
 
-        if any(k in q for k in ["how many", "count", "number of"]):
+        if "bench" in q or "not assigned" in q:
+            qt = "filtering"
+            bench_mode = True
+        elif any(k in q for k in ["how many", "count", "number of"]):
             qt = "counting"
             if "project" in q:
                 project_mode = True
@@ -288,6 +294,7 @@ class BusinessIntelligenceEngine:
             rfp_keyword=rfp_keyword,
             certification_mode=certification_mode,
             project_mode=project_mode,
+            bench_mode=bench_mode,
         )
 
     def _llm_plan(self, question: str) -> Optional[QueryPlan]:
@@ -550,7 +557,7 @@ Return a single JSON object matching the schema exactly.
         if plan.project_mode:
             cypher = (
                 "MATCH (proj:Project)\n"
-                "WHERE toLower(coalesce(proj.status,'')) IN ['ongoing','active','in progress']\n"
+                "WHERE toLower(coalesce(proj.status,'')) IN ['ongoing','active','in progress','new rfp']\n"
                 "RETURN count(DISTINCT proj) as result"
             )
             return cypher, {}
@@ -567,6 +574,18 @@ Return a single JSON object matching the schema exactly.
         return cypher, params
 
     def _cypher_filtering(self, plan: QueryPlan) -> Tuple[str, Dict[str, Any]]:
+        if getattr(plan, "bench_mode", False):
+            cypher = """
+            MATCH (p:Person)
+            WHERE NOT (p)-[:ASSIGNED_TO]->(:Project)
+            OPTIONAL MATCH (p)-[:HAS_SKILL]->(s:Skill)
+            RETURN p.name as name, p.role as role, p.seniority as seniority,
+                   collect(DISTINCT coalesce(s.id,s.name)) as skills
+            ORDER BY name
+            LIMIT 50
+            """
+            return cypher, {}
+
         params: Dict[str, Any] = {"skills": [s.lower() for s in plan.skills]}
         skill_cte = self._skill_and_clause(plan.skills)
         cypher = "MATCH (p:Person)\n"
@@ -2030,9 +2049,37 @@ Rules:
         return fallback
 
     # -----------------------------
+    # PII MASKING
+    # -----------------------------
+    def _mask_name(self, name: str) -> str:
+        h = hashlib.md5(name.encode()).hexdigest()[:8].upper()
+        return f"Candidate_{h}"
+
+    def _anonymize_rows(self, rows):
+        decoder_map = {}
+        if not isinstance(rows, list):
+            return rows, decoder_map
+
+        new_rows = []
+        for r in rows:
+            if not isinstance(r, dict):
+                new_rows.append(r)
+                continue
+            rr = dict(r)
+            # maskuj typowe pola z osobą
+            for k in ["name", "owner_name", "person_a", "person_b", "focus_person", "collaborator", "developer_1", "developer_2", "top_performer", "colleague"]:
+                if k in rr and isinstance(rr[k], str) and rr[k].strip():
+                    masked = self._mask_name(rr[k])
+                    decoder_map[masked] = rr[k]
+                    rr[k] = masked
+            new_rows.append(rr)
+
+        return new_rows, decoder_map
+
+    # -----------------------------
     # MAIN ENTRY
     # -----------------------------
-    def answer_question(self, question: str) -> Dict[str, Any]:
+    def answer_question(self, question: str, privacy_mode: bool = False) -> Dict[str, Any]:
         plan = self.plan_question(question)
         if not plan:
             return {"success": False, "error": "Could not build plan", "natural_answer": "I can’t confirm from the graph."}
@@ -2049,11 +2096,18 @@ Rules:
         except Exception as e:
             return {"success": False, "error": str(e), "natural_answer": "I can’t confirm from the graph."}
 
+        # --- Anonymization ---
+        decoder_map = {}
+        if privacy_mode:
+            rows, decoder_map = self._anonymize_rows(rows)
+        # ---------------------
+
         natural_answer = self._format_answer(plan, rows)
         result = {
             "success": True,
             "result": rows,
             "natural_answer": natural_answer,
+            "decoder_map": decoder_map,
             "plan": plan.dict(),
             "cypher": cypher,
             "params": params,

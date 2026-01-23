@@ -262,15 +262,15 @@ with st.sidebar:
         st.button("AWS DevOps", on_click=set_q, args=("Find Senior DevOps Engineers who know AWS.",))
 
     with st.expander("🚀 Scenarios"):
-        st.button("Build Team (3x Python)", on_click=set_q, args=("Suggest an optimal team of 3 available Developers with Python skills.",))
-        st.button("Skills Gap (RFP Pipeline)", on_click=set_q, args=("Skills gaps analysis for upcoming project pipeline",))
-        st.button("Risk (SPOF)", on_click=set_q, args=("Risk assessment: single points of failure in current assignments",))
+        st.button("Build Team (Python)", on_click=set_q, args=("Suggest an optimal team with Python under budget constraints.",))
+        st.button("Skills Gap (RFP Pipeline)", on_click=set_q, args=("Gap analysis: skills gaps for upcoming RFP pipeline.",))
+        st.button("Risk (SPOF)", on_click=set_q, args=("Risk assessment: single points of failure (SPOF) in current assignments.",))
 
     with st.expander("📊 Analytics"):
         st.button("Avg Rates", on_click=set_q, args=("What is the average hourly rate of Senior Python Developers?",))
 
     with st.expander("🔢 Statistics"):
-        st.button("Total Projects", on_click=set_q, args=("How many active projects are there?",))
+        st.button("Total Projects", on_click=set_q, args=("How many active projects are there? (count)",))
 
     with st.expander("🔗 Network"):
         st.button("Jacob's Network", on_click=set_q, args=("Who has worked with Jacob Young in the past?",))
@@ -381,7 +381,7 @@ with tab1:
 
         with st.chat_message("assistant", avatar="🤖"):
             with st.spinner("Analyzing Knowledge Graph..."):
-                response = st.session_state.engine.answer_question(user_input)
+                response = st.session_state.engine.answer_question(user_input, privacy_mode=privacy_mode)
 
                 if response.get("success"):
                     raw_text = response.get("natural_answer", "")
