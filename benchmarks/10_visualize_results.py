@@ -8,7 +8,8 @@ sns.set_theme(style="whitegrid")
 plt.rcParams.update({'font.size': 12})
 
 # Ścieżka do pliku CSV (z Twoich logów)
-csv_path = "benchmarks/ragas_evaluation_results.csv"
+current_dir = os.path.dirname(os.path.abspath(__file__))
+csv_path = os.path.join(current_dir, "ragas_evaluation_results.csv")
 
 if not os.path.exists(csv_path):
     print("❌ Nie znaleziono pliku CSV. Uruchom najpierw skrypt 9.")
@@ -45,7 +46,7 @@ for container in chart.containers:
     chart.bar_label(container, fmt='%.2f', padding=3)
 
 # Zapis
-output_path = "benchmarks/final_comparison_chart.png"
+output_path = os.path.join(current_dir, "final_comparison_chart.png")
 plt.tight_layout()
 plt.savefig(output_path, dpi=300)
 print(f"✅ Wykres zapisano jako: {output_path}")

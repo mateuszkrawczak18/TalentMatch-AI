@@ -1,6 +1,8 @@
 import sys
 import os
 import time
+import csv
+import statistics
 import importlib.util
 
 # --- 1. SETUP ŚCIEŻEK ---
@@ -34,6 +36,9 @@ except Exception as e:
     sys.exit(1)
 
 # --- 3. GŁÓWNA FUNKCJA BENCHMARKU ---
+
+# Configuration
+RUNS_PER_SCENARIO = 5  # Number of times to run each scenario for statistical analysis
 
 def run_benchmark():
     print("\n" + "="*70)
@@ -106,66 +111,163 @@ def run_benchmark():
         }
     ]
 
-    # 4. Pętla Wykonawcza
+    # 4. CSV Results Storage
+    csv_file = os.path.join(parent_dir, "benchmarks", "benchmark_results.csv")
+    csv_exists = os.path.exists(csv_file)
+    
+    # Open CSV file for writing
+    with open(csv_file, 'a', newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['scenario', 'system', 'run_idx', 'latency_seconds', 'success', 'timestamp']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        
+        if not csv_exists:
+            writer.writeheader()
+        
+        # 5. Statistics tracking
+        graphrag_times = {s['name']: [] for s in scenarios}
+        naive_times = {s['name']: [] for s in scenarios}
+        
+        # 6. Pętla Wykonawcza (Multiple runs)
+        for run_idx in range(1, RUNS_PER_SCENARIO + 1):
+            print(f"\n{'='*70}")
+            print(f"🔄 RUN {run_idx}/{RUNS_PER_SCENARIO}")
+            print(f"{'='*70}")
+            
+            for scenario in scenarios:
+                q = scenario["question"]
+                scenario_name = scenario["name"]
+                
+                if run_idx == 1:  # Only show details on first run
+                    print("\n\n" + "🔸"*30)
+                    print(f"🔸 {scenario_name}")
+                    print(f"❓ Question: '{q}'")
+                    print(f"ℹ️  Expectation: {scenario['expectation']}")
+                    print("-" * 70)
+                else:
+                    print(f"\n▶️ {scenario_name} - Run {run_idx}/{RUNS_PER_SCENARIO}", end=" ")
+
+                # --- A. GraphRAG ---
+                if run_idx == 1:
+                    print("🔵 GraphRAG (Thinking...):")
+                
+                start_g = time.time()
+                success_g = False
+                
+                try:
+                    # Zapytanie do silnika
+                    g_response = graph_engine.answer_question(q)
+                    time_g = time.time() - start_g
+                    
+                    # LOGIKA DEKODOWANIA (TO NAPRAWIA WIDOK)
+                    if g_response.get('success'):
+                        success_g = True
+                        graphrag_times[scenario_name].append(time_g)
+                        
+                        if run_idx == 1:  # Only show details on first run
+                            final_answer = g_response.get('natural_answer', "")
+                            
+                            # Retrieve query type from the plan object
+                            plan_data = g_response.get('plan', {})
+                            query_type = plan_data.get('type', 'unknown')
+                            
+                            # Note: decoder_map logic removed as names are not masked in current BI Engine
+                            
+                            print(f"⏱️ Time: {time_g:.2f}s")
+                            print(f"🏷️ Type: {query_type}")
+                            print(f"💡 Result:\n{final_answer.strip()}")
+                            
+                            # Opcjonalnie pokaż Cypher dla Scenariusza 6 (żeby widzieć jak to zrobił)
+                            if "SCENARIO 6" in scenario_name:
+                                print(f"\n[Cypher Logic]:\n{g_response.get('cypher')}")
+                    else:
+                        if run_idx == 1:
+                            print(f"❌ Error: {g_response.get('error')}")
+                        
+                except Exception as e:
+                    time_g = time.time() - start_g
+                    if run_idx == 1:
+                        print(f"❌ Critical Crash in GraphRAG: {e}")
+                
+                # Write to CSV
+                writer.writerow({
+                    'scenario': scenario_name,
+                    'system': 'GraphRAG',
+                    'run_idx': run_idx,
+                    'latency_seconds': round(time_g, 4),
+                    'success': success_g,
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                })
+
+                if run_idx == 1:
+                    print("\n" + "-" * 30)
+
+                # --- B. Naive RAG ---
+                if run_idx == 1:
+                    print("🟠 Naive RAG (Searching text...):")
+                
+                start_n = time.time()
+                success_n = False
+                
+                try:
+                    n_response = naive_system.query(q) 
+                    time_n = time.time() - start_n
+                    success_n = bool(n_response)
+                    naive_times[scenario_name].append(time_n)
+                    
+                    if run_idx == 1:
+                        print(f"⏱️ Time: {time_n:.2f}s")
+                        print(f"💡 Result:\n{n_response}")
+                except Exception as e:
+                    time_n = time.time() - start_n
+                    if run_idx == 1:
+                        print(f"❌ Error in Naive RAG: {e}")
+                
+                # Write to CSV
+                writer.writerow({
+                    'scenario': scenario_name,
+                    'system': 'NaiveRAG',
+                    'run_idx': run_idx,
+                    'latency_seconds': round(time_n, 4),
+                    'success': success_n,
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                })
+                
+                if run_idx == 1:
+                    print("-" * 70)
+                elif run_idx == RUNS_PER_SCENARIO:
+                    print(f"✓ (GraphRAG: {time_g:.2f}s, NaiveRAG: {time_n:.2f}s)")
+    
+    # 7. Print Statistics Summary
+    print("\n" + "="*70)
+    print("📊 PERFORMANCE STATISTICS SUMMARY")
+    print("="*70)
+    print(f"Runs per scenario: {RUNS_PER_SCENARIO}\n")
+    
     for scenario in scenarios:
-        q = scenario["question"]
-        print("\n\n" + "🔸"*30)
-        print(f"🔸 {scenario['name']}")
-        print(f"❓ Question: '{q}'")
-        print(f"ℹ️  Expectation: {scenario['expectation']}")
-        print("-" * 70)
-
-        # --- A. GraphRAG ---
-        print("🔵 GraphRAG (Thinking...):")
-        start_g = time.time()
+        sname = scenario['name']
+        g_times = graphrag_times[sname]
+        n_times = naive_times[sname]
         
-        try:
-            # Zapytanie do silnika
-            g_response = graph_engine.answer_question(q)
-            time_g = time.time() - start_g
-            
-            # LOGIKA DEKODOWANIA (TO NAPRAWIA WIDOK)
-            if g_response.get('success'):
-                final_answer = g_response.get('natural_answer', "")
-                decoder_map = g_response.get('decoder_map', {})
-                query_type = g_response.get('type', 'unknown')
-                
-                # Pętla podmieniająca hashe na nazwiska
-                if decoder_map:
-                    for fake_id, real_name in decoder_map.items():
-                        final_answer = final_answer.replace(fake_id, f"{real_name}")
-                
-                print(f"⏱️ Time: {time_g:.2f}s")
-                print(f"🏷️ Type: {query_type}")
-                print(f"💡 Result:\n{final_answer.strip()}")
-                
-                # Opcjonalnie pokaż Cypher dla Scenariusza 6 (żeby widzieć jak to zrobił)
-                if "SCENARIO 6" in scenario['name']:
-                    print(f"\n[Cypher Logic]:\n{g_response.get('cypher')}")
-
-            else:
-                print(f"❌ Error: {g_response.get('error')}")
-                
-        except Exception as e:
-            print(f"❌ Critical Crash in GraphRAG: {e}")
-
-        print("\n" + "-" * 30)
-
-        # --- B. Naive RAG ---
-        print("🟠 Naive RAG (Searching text...):")
-        start_n = time.time()
-        try:
-            n_response = naive_system.query(q) 
-            time_n = time.time() - start_n
-            
-            print(f"⏱️ Time: {time_n:.2f}s")
-            print(f"💡 Result:\n{n_response}")
-        except Exception as e:
-            print(f"❌ Error in Naive RAG: {e}")
-        
+        print(f"\n{sname}")
         print("-" * 70)
-
-    print("\n✅ Benchmark Finished. Zrób screenshoty do raportu!")
+        
+        if g_times:
+            g_avg = statistics.mean(g_times)
+            g_p95 = sorted(g_times)[int(len(g_times) * 0.95)] if len(g_times) > 1 else g_times[0]
+            print(f"  GraphRAG:  avg={g_avg:.3f}s, p95={g_p95:.3f}s, min={min(g_times):.3f}s, max={max(g_times):.3f}s")
+        
+        if n_times:
+            n_avg = statistics.mean(n_times)
+            n_p95 = sorted(n_times)[int(len(n_times) * 0.95)] if len(n_times) > 1 else n_times[0]
+            print(f"  NaiveRAG:  avg={n_avg:.3f}s, p95={n_p95:.3f}s, min={min(n_times):.3f}s, max={max(n_times):.3f}s")
+        
+        if g_times and n_times:
+            speedup = statistics.mean(n_times) / statistics.mean(g_times)
+            print(f"  Speedup: {speedup:.2f}x ({'GraphRAG faster' if speedup > 1 else 'NaiveRAG faster'})")
+    
+    print("\n" + "="*70)
+    print(f"✅ Benchmark Finished! Results saved to: {csv_file}")
+    print("="*70)
 
 if __name__ == "__main__":
     run_benchmark()
